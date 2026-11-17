@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+.venv37/
+frontend/node_modules/
+frontend/dist/
+backend/uploads/*
+backend/trained_models/*
+backend/experiments/*
+!.gitkeep
+*.db
+.env
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Datasets
+datasets/raw/
+datasets/processed/
+
+# Model artifacts
+models/*.pkl
+models/*_metadata.json
+
+# Experiment logs
+experiments/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/

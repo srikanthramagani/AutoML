@@ -1,0 +1,1 @@
+Page-level composition boundaries for dashboard, upload, profiling, training, results, and model download views.
