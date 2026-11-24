@@ -22,10 +22,13 @@ venv/
 env/
 
 # Datasets
+datasets/
 datasets/raw/
 datasets/processed/
 
 # Model artifacts
+models/trained_artifacts/
+models/*.joblib
 models/*.pkl
 models/*_metadata.json
 
