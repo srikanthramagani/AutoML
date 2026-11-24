@@ -4,6 +4,7 @@ Tests for Optuna Search Space and Optimizer
 
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LinearRegression
 from backend.app.optimization.search_space import SearchSpace
 from backend.app.optimization.objective import OptunaObjective
 from backend.app.optimization.optimizer import HyperparameterOptimizer
@@ -14,6 +15,24 @@ def test_search_space():
     space = SearchSpace()
     assert "random_forest" in space._spaces
     assert "logistic_regression" in space._spaces
+
+
+def test_regression_error_objectives_are_minimized():
+    X = pd.DataFrame({"x": [0.0, 1.0, 2.0, 3.0]})
+    y = pd.Series([0.0, 1.0, 2.0, 3.0])
+    pipeline = PreprocessingPipelineBuilder().build()
+    for metric in ("rmse", "mse", "mae", "neg_mean_squared_error"):
+        objective = OptunaObjective(
+            preprocessing_pipeline=pipeline,
+            estimator=LinearRegression(),
+            model_name="linear_regression",
+            X=X,
+            y=y,
+            scoring=metric,
+            cv_folds=2,
+            task_type="regression",
+        )
+        assert objective.direction == "minimize"
 
 
 def test_optimizer():

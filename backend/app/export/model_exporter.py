@@ -10,7 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 import joblib
-from sklearn.pipeline import Pipeline
 
 
 class ModelExporter:
@@ -25,7 +24,7 @@ class ModelExporter:
 
     def export(
         self,
-        pipeline: Pipeline,
+        pipeline: Any,
         model_name: str,
         metadata: Optional[Dict[str, Any]] = None,
         filename: str = "trained_pipeline",
@@ -53,7 +52,7 @@ class ModelExporter:
         print(f"[ModelExporter] Saved pipeline metadata -> {json_path}")
         return os.path.abspath(pkl_path)
 
-    def load(self, pkl_path: str) -> Pipeline:
+    def load(self, pkl_path: str) -> Any:
         """
         Load an exported pipeline from disk.
         """

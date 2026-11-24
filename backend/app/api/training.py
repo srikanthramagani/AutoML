@@ -20,28 +20,100 @@ from .state import DATASETS, JOBS, PROJECT_ROOT
 router = APIRouter()
 
 
-def _write_leaderboard_chart(job_id: str, records: list[dict], output_dir: str) -> str:
+def _write_leaderboard_chart(
+    job_id: str,
+    records: list[dict],
+    output_dir: str,
+    primary_metric: str = "Score",
+    best_model: str = "",
+    task_type: str = "Automated Machine Learning",
+) -> str:
     valid_records = [record for record in records if record.get("is_valid")]
     chart_path = Path(output_dir) / f"{job_id}_leaderboard.png"
-    if valid_records:
-        chart_data = pd.DataFrame(sorted(valid_records, key=lambda record: record.get("cv_mean_score", 0), reverse=True))
-        figure, axis = plt.subplots(figsize=(10, 4.8), dpi=150)
-        sns.set_theme(style="whitegrid", palette="deep")
-        sns.barplot(
-            data=chart_data,
-            x="cv_mean_score",
-            y="model_name",
-            hue="model_name",
-            legend=False,
-            ax=axis,
-            palette="dark:#1d4c3c",
+    if not valid_records:
+        return str(chart_path)
+
+    metric_lower = primary_metric.lower().removeprefix("neg_")
+    higher_better = metric_lower not in {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}
+
+    # Sort so best model is at the top of the horizontal bar chart (highest y-position)
+    sorted_records = sorted(
+        valid_records,
+        key=lambda record: record.get("cv_mean_score", 0),
+        reverse=not higher_better,
+    )
+    chart_data = pd.DataFrame(sorted_records)
+
+    figure, axis = plt.subplots(figsize=(10.5, max(4.5, len(chart_data) * 0.52)), dpi=180)
+    sns.set_theme(style="white", font="sans-serif")
+
+    colors = []
+    for m in chart_data["model_name"]:
+        if m == best_model:
+            colors.append("#0d9488")  # Highlight winner in teal/emerald
+        else:
+            colors.append("#3b82f6")  # High-contrast modern indigo/blue
+
+    y_positions = list(range(len(chart_data)))
+    scores = chart_data["cv_mean_score"].to_numpy()
+    std_scores = [float(r.get("cv_std_score", 0) or 0) for _, r in chart_data.iterrows()]
+
+    bars = axis.barh(
+        y_positions,
+        scores,
+        xerr=std_scores,
+        color=colors,
+        alpha=0.92,
+        height=0.62,
+        edgecolor="#1e293b",
+        linewidth=0.8,
+        capsize=4,
+        error_kw={"elinewidth": 1.2, "ecolor": "#475569"},
+    )
+
+    axis.set_yticks(y_positions)
+    model_labels = []
+    for m in chart_data["model_name"]:
+        if m == best_model:
+            model_labels.append(f"★ {m} (Winner)")
+        else:
+            model_labels.append(f"  {m}")
+    axis.set_yticklabels(model_labels, fontsize=10.5, fontweight="600")
+
+    max_val = max(np.abs(scores)) if len(scores) else 1.0
+    for bar, score, std in zip(bars, scores, std_scores):
+        width = bar.get_width()
+        label_text = f" {score:.4f} ± {std:.4f}"
+        axis.text(
+            width + (max_val * 0.02 if width >= 0 else -max_val * 0.02),
+            bar.get_y() + bar.get_height() / 2,
+            label_text,
+            va="center",
+            ha="left" if width >= 0 else "right",
+            fontsize=9.5,
+            fontweight="bold",
+            color="#0f172a",
         )
-        axis.set_title("Cross-validation performance by algorithm", loc="left", fontweight="bold")
-        axis.set_xlabel("Mean validation score")
-        axis.set_ylabel("")
-        figure.tight_layout()
-        figure.savefig(chart_path, transparent=False, facecolor="#f7f4ec")
-        plt.close(figure)
+
+    axis.spines["top"].set_visible(False)
+    axis.spines["right"].set_visible(False)
+    axis.spines["left"].set_color("#cbd5e1")
+    axis.spines["bottom"].set_color("#cbd5e1")
+    axis.grid(axis="x", linestyle="--", alpha=0.35, color="#94a3b8")
+
+    axis.set_title(
+        f"Cross-Validation Model Leaderboard · {task_type.replace('_', ' ').title()}",
+        loc="left",
+        fontsize=13,
+        fontweight="bold",
+        pad=14,
+        color="#0f172a",
+    )
+    axis.set_xlabel(f"Cross-Validation Mean ({primary_metric}) ± Fold Std Dev", fontsize=10.5, labelpad=8, color="#334155")
+
+    figure.tight_layout()
+    figure.savefig(chart_path, transparent=False, facecolor="#ffffff", bbox_inches="tight")
+    plt.close(figure)
     return str(chart_path)
 
 
@@ -82,6 +154,9 @@ def _run_job(job_id: str, request: TrainingStartRequest) -> None:
                 job_id,
                 engine.model_records_,
                 str(PROJECT_ROOT / backend_settings.model_directory),
+                primary_metric=engine.task_info_.primary_metric if engine.task_info_ else "Score",
+                best_model=engine.best_model_name_ or "",
+                task_type=engine.task_info_.task_type if engine.task_info_ else "Automated Machine Learning",
             )
         except Exception as exc:
             chart_error = str(exc)
@@ -104,6 +179,8 @@ def _run_job(job_id: str, request: TrainingStartRequest) -> None:
             "identifier_reasons": engine.profile_.identifier_reasons if engine.profile_ else {},
             "features_used": engine.feature_columns_,
             "prediction_series": engine.prediction_series_ or [],
+            "explainability": engine.explainability_,
+            "unsupervised_visualization": engine.unsupervised_visualization_,
             "leaderboard_chart": chart_path,
             "leaderboard_chart_error": chart_error,
         })

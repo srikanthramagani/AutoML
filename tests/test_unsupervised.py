@@ -16,6 +16,37 @@ from backend.app.automl.engine import AutoMLEngine
 from backend.app.config.settings import Settings
 
 
+class _NoPruneTrial:
+    def suggest_int(self, name, low, high, **kwargs):
+        return low
+
+    def suggest_float(self, name, low, high, **kwargs):
+        return low
+
+    def suggest_categorical(self, name, choices):
+        return choices[0]
+
+    def report(self, value, step):
+        self.value = value
+
+    def should_prune(self):
+        return False
+
+
+def test_unlabeled_anomaly_objective_uses_resampling_stability():
+    X = np.random.default_rng(3).normal(size=(40, 3))
+    candidate = next(model for model in get_anomaly_detection_models() if model["name"] == "isolation_forest")
+    objective = UnsupervisedOptunaObjective(
+        estimator=candidate["estimator"],
+        model_name=candidate["name"],
+        X=X,
+        task_type="anomaly_detection",
+        random_state=5,
+    )
+    score = objective(_NoPruneTrial())
+    assert -1.0 <= score <= 1.0
+
+
 def test_clustering_models_pool():
     models = get_clustering_models()
     assert len(models) >= 4
@@ -49,6 +80,21 @@ def test_unsupervised_metrics():
     assert res.task_type == "clustering"
     assert "silhouette_score" in res.metrics
     assert "calinski_harabasz_score" in res.metrics
+
+
+def test_anomaly_ground_truth_metrics_use_numeric_positive_labels():
+    calc = UnsupervisedMetricsCalculator(task_type="anomaly_detection")
+    result = calc.compute(
+        model_name="iforest",
+        X=np.zeros((4, 2)),
+        labels=np.array([-1, 1, -1, 1]),
+        scores=np.array([0.9, 0.1, 0.8, 0.2]),
+        ground_truth=np.array([1, 0, 0, 1]),
+    )
+    assert result.metrics["precision"] == 0.5
+    assert result.metrics["recall"] == 0.5
+    assert result.metrics["f1"] == 0.5
+    assert "evaluation_type_unsupervised_diagnostic" not in result.metrics
 
 
 def test_unsupervised_e2e_clustering():

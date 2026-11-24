@@ -27,7 +27,7 @@ def get_clustering_models(random_state: int = 42) -> List[Dict[str, Any]]:
             "estimator": KMeans(
                 n_clusters=3,
                 init="k-means++",
-                n_init=10,
+                n_init=15,
                 random_state=random_state,
             ),
             "tags": ["clustering", "centroid-based", "partitioning"],

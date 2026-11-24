@@ -23,6 +23,8 @@ from sklearn.metrics import (
     r2_score,
     recall_score,
     roc_auc_score,
+    average_precision_score,
+    confusion_matrix,
 )
 
 
@@ -85,10 +87,17 @@ class MetricsCalculator:
         metrics["balanced_accuracy"] = float(balanced_accuracy_score(y_true, y_pred))
         metrics["f1_weighted"] = float(f1_score(y_true, y_pred, average="weighted", zero_division=0))
         metrics["f1_macro"] = float(f1_score(y_true, y_pred, average="macro", zero_division=0))
+        metrics["f1"] = float(f1_score(y_true, y_pred, average="weighted", zero_division=0))
         metrics["precision_weighted"] = float(precision_score(y_true, y_pred, average="weighted", zero_division=0))
         metrics["precision_macro"] = float(precision_score(y_true, y_pred, average="macro", zero_division=0))
+        metrics["precision"] = float(precision_score(y_true, y_pred, average="weighted", zero_division=0))
         metrics["recall_weighted"] = float(recall_score(y_true, y_pred, average="weighted", zero_division=0))
         metrics["recall_macro"] = float(recall_score(y_true, y_pred, average="macro", zero_division=0))
+        metrics["recall"] = float(recall_score(y_true, y_pred, average="weighted", zero_division=0))
+        cm = confusion_matrix(y_true, y_pred, labels=np.unique(y_true))
+        for row in range(cm.shape[0]):
+            for col in range(cm.shape[1]):
+                metrics[f"confusion_matrix_{row}_{col}"] = float(cm[row, col])
         for class_index, class_label in enumerate(np.unique(y_true)):
             metrics[f"recall_class_{class_index}"] = float(
                 recall_score(y_true, y_pred, labels=[class_label], average="macro", zero_division=0)
@@ -105,8 +114,10 @@ class MetricsCalculator:
                 if n_classes == 2:
                     proba_col = y_proba[:, 1] if y_proba.ndim == 2 and y_proba.shape[1] > 1 else y_proba
                     metrics["roc_auc"] = float(roc_auc_score(y_true, proba_col))
+                    metrics["pr_auc"] = float(average_precision_score(y_true, proba_col, pos_label=np.unique(y_true)[-1]))
                 else:
                     metrics["roc_auc"] = float(roc_auc_score(y_true, y_proba, multi_class="ovr", average="weighted"))
+                    metrics["pr_auc"] = float(average_precision_score(y_true, y_proba, average="weighted"))
                 # Log Loss (cross-entropy)
                 metrics["log_loss"] = float(log_loss(y_true, y_proba))
             except Exception:
@@ -147,6 +158,24 @@ class MetricsCalculator:
         metrics["mae"] = mae
         metrics["mse"] = mse
         metrics["rmse"] = rmse
+
+        # SMAPE (Symmetric Mean Absolute Percentage Error)
+        try:
+            denominator = np.abs(y_true) + np.abs(y_pred)
+            valid_denom = denominator != 0
+            if np.any(valid_denom):
+                metrics["smape"] = float(np.mean(np.divide(2.0 * np.abs(y_true - y_pred), denominator, out=np.zeros_like(denominator, dtype=float), where=valid_denom)) * 100)
+            else:
+                metrics["smape"] = 0.0
+        except Exception:
+            metrics["smape"] = 0.0
+
+        # SMAE (Scaled Mean Absolute Error normalized by mean absolute value of actuals)
+        try:
+            mean_abs_y = float(np.mean(np.abs(y_true)))
+            metrics["smae"] = float(mae / (mean_abs_y + 1e-8))
+        except Exception:
+            metrics["smae"] = 0.0
 
         # MAPE (Mean Absolute Percentage Error)
         try:

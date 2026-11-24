@@ -8,6 +8,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from ..config.settings import backend_settings
 from ..data.loader import DataLoader
 from ..data.profiler import DataProfiler
+from ..data.modalities import detect_modalities
 from .state import DATASETS, PROJECT_ROOT
 
 router = APIRouter()
@@ -68,6 +69,7 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail=f"Could not read CSV: {exc}") from exc
 
     response_profile = _profile_response(profile, load_result.target_column)
+    modality_report = detect_modalities(dataframe, target=load_result.target_column).to_dict()
     DATASETS[dataset_id] = {
         "id": dataset_id,
         "filename": file.filename,
@@ -75,6 +77,7 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict:
         "encoding": load_result.encoding,
         "delimiter": load_result.delimiter,
         "profile": response_profile,
+        "modality_report": modality_report,
     }
     return {
         "id": dataset_id,
@@ -83,4 +86,5 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict:
         "encoding": load_result.encoding,
         "delimiter": load_result.delimiter,
         **response_profile,
+        "modality_report": modality_report,
     }

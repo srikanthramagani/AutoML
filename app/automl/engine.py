@@ -14,6 +14,7 @@ from sklearn.pipeline import Pipeline
 from ..config.settings import Settings, default_settings
 from ..data.loader import DataLoader
 from ..data.profiler import DataProfiler, DataProfile
+from backend.app.data.modalities import detect_modalities
 from ..data.task_detector import TaskDetector, TaskInfo
 from ..evaluation.cross_validation import CrossValidator, CVResult
 from ..evaluation.metrics import MetricsCalculator, MetricsResult
@@ -48,6 +49,9 @@ class AutoMLEngine:
         self.final_pipeline_: Optional[Pipeline] = None
         self.holdout_metrics_: Optional[MetricsResult] = None
         self.export_path_: Optional[str] = None
+        self.y_holdout_: Optional[pd.Series] = None
+        self.y_pred_holdout_: Optional[np.ndarray] = None
+        self.y_proba_holdout_: Optional[np.ndarray] = None
 
     def fit(
         self,
@@ -69,6 +73,12 @@ class AutoMLEngine:
         loader = DataLoader(target_column=target_column)
         df, load_result = loader.load(csv_path)
         target_col = load_result.target_column
+        modality_report = detect_modalities(df, target=target_col)
+        if modality_report.text:
+            raise ValueError(
+                "Natural-language columns were detected and cannot enter the tabular-only pipeline: "
+                f"{modality_report.text}. Use the multimodal workflow or explicitly reassign the columns."
+            )
         X, y = loader.split_features_target(df, target_col)
         print(f"  Loaded {len(df):,} rows x {len(df.columns)} columns. Target: '{target_col}'")
 
@@ -223,6 +233,8 @@ class AutoMLEngine:
         # ?? Step 11: Holdout Validation & Export ??????????????????????????
         print("[AutoML] Step 11/11 - Evaluating holdout test partition & exporting pipeline...")
         y_pred = self.final_pipeline_.predict(X_holdout)
+        self.y_holdout_ = y_holdout.copy()
+        self.y_pred_holdout_ = np.asarray(y_pred)
 
         y_proba = None
         if task_family == "classification" and hasattr(self.final_pipeline_, "predict_proba"):
@@ -230,6 +242,7 @@ class AutoMLEngine:
                 y_proba = self.final_pipeline_.predict_proba(X_holdout)
             except Exception:
                 y_proba = None
+        self.y_proba_holdout_ = np.asarray(y_proba) if y_proba is not None else None
 
         calc = MetricsCalculator(task_type=self.task_info_.task_type)
         self.holdout_metrics_ = calc.compute(

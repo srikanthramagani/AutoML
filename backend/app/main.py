@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from .api import downloads, models, profiling, training, upload
+from .api import downloads, models, profiling, training, upload, multimodal, forecasting
 
 app = FastAPI(
     title="Adaptive AutoML Platform API",
@@ -15,8 +15,10 @@ app.include_router(profiling.router, prefix="/api", tags=["profiling"])
 app.include_router(training.router, prefix="/api", tags=["training"])
 app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(downloads.router, prefix="/api", tags=["downloads"])
+app.include_router(multimodal.router, prefix="/api", tags=["multimodal"])
+app.include_router(forecasting.router, prefix="/api", tags=["forecasting"])
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "phase": "1-skeleton"}
+    return {"status": "ok", "phase": "multimodal-extension"}

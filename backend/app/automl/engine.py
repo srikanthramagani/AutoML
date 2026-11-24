@@ -6,6 +6,8 @@ Supervised (Classification & Regression) and Unsupervised (Clustering & Anomaly 
 """
 
 from typing import Any, Dict, List, Optional
+from pathlib import Path
+import hashlib
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
@@ -15,6 +17,7 @@ from sklearn.pipeline import Pipeline
 from ..config.settings import Settings, default_settings
 from ..data.loader import DataLoader
 from ..data.profiler import DataProfiler, DataProfile
+from ..data.modalities import detect_modalities
 from ..data.task_detector import TaskDetector, TaskInfo
 from ..evaluation.cross_validation import CrossValidator, CVResult
 from ..evaluation.fairness import FairnessAuditResult, FairnessAuditor
@@ -22,6 +25,7 @@ from ..evaluation.generalization import GeneralizationAuditor, GeneralizationDia
 from ..evaluation.metrics import MetricsCalculator, MetricsResult
 from ..evaluation.model_ranker import ModelRanker, RankedModel
 from ..export.model_exporter import ModelExporter
+from ..explainability import ExplainabilityService
 from ..models.model_registry import ModelRegistry
 from ..optimization.objective import OptunaObjective
 from ..optimization.unsupervised_objective import UnsupervisedOptunaObjective
@@ -58,6 +62,11 @@ class AutoMLEngine:
         self.prediction_series_: Optional[List[Dict[str, Any]]] = None
         self.generalization_audit_: Optional[GeneralizationDiagnostic] = None
         self.candidate_diagnostics_: Dict[str, Any] = {}
+        self.y_holdout_: Optional[pd.Series] = None
+        self.y_pred_holdout_: Optional[np.ndarray] = None
+        self.y_proba_holdout_: Optional[np.ndarray] = None
+        self.explainability_: Optional[Dict[str, Any]] = None
+        self.unsupervised_visualization_: Optional[Dict[str, Any]] = None
 
     def fit(
         self,
@@ -91,6 +100,12 @@ class AutoMLEngine:
             target_col = None
         else:
             target_col = load_result.target_column
+        modality_report = detect_modalities(df, target=target_col)
+        if modality_report.text:
+            raise ValueError(
+                "Natural-language columns were detected and cannot enter the tabular-only pipeline: "
+                f"{modality_report.text}. Use POST /api/multimodal/train or explicitly reassign the columns."
+            )
 
         profiler = DataProfiler()
         self.profile_ = profiler.profile(df, target_column=target_col)
@@ -108,7 +123,6 @@ class AutoMLEngine:
             X = df.drop(columns=cols_to_drop).copy()
             y = None
 
-        self.feature_columns_ = list(X.columns)
         sensitive_columns = list(cfg.sensitive_columns)
         missing_sensitive = [column for column in sensitive_columns if column not in X.columns]
         if missing_sensitive:
@@ -116,6 +130,7 @@ class AutoMLEngine:
         sensitive_values = X[sensitive_columns].copy() if sensitive_columns else None
         if sensitive_columns:
             X = X.drop(columns=sensitive_columns)
+        self.feature_columns_ = list(X.columns)
 
         print(f"  Loaded {len(df):,} rows x {len(df.columns)} columns. Target: '{target_col or '[None - Unsupervised]'}'")
 
@@ -206,13 +221,17 @@ class AutoMLEngine:
         print(f"  Pipeline steps: {[name for name, _ in preprocessing_pipeline.steps]}")
 
         # Speed Optimization: Pre-transform X_train for HPO caching
-        if cfg.cache_preprocessed:
+        if cfg.cache_preprocessed and not is_unsupervised:
             print("[AutoML] Precomputing preprocessed features for high-speed HPO...")
             preprocessor_fitted = clone(preprocessing_pipeline).fit(X_train)
             X_train_transformed = preprocessor_fitted.transform(X_train)
         else:
             preprocessor_fitted = None
             X_train_transformed = None
+        if is_unsupervised:
+            # There is no label based CV for these algorithms; fit the transform
+            # on the training partition only, never on the holdout partition.
+            X_train_transformed = clone(preprocessing_pipeline).fit_transform(X_train)
 
         # ── Step 6: Candidate Model Pool ──────────────────────────────────
         print("[AutoML] Step 6/11 - Loading candidate model pool...")
@@ -234,7 +253,9 @@ class AutoMLEngine:
             n_trials=trials_count,
             timeout=cfg.optimization_timeout,
             random_state=cfg.random_seed,
+            storage_url=cfg.optuna_storage_url or f"sqlite:///{Path(cfg.experiments_dir, 'optuna_studies.db').as_posix()}",
         )
+        dataset_key = hashlib.sha256(Path(csv_path).read_bytes()).hexdigest()[:12]
 
         self.optimization_results_ = {}
         for entry in model_pool:
@@ -253,6 +274,7 @@ class AutoMLEngine:
                     search_space=search_space,
                     random_state=cfg.random_seed,
                 )
+                obj.study_name = f"{dataset_key}_{task_family}_{self.task_info_.primary_metric}_{m_name}"
             else:
                 obj = OptunaObjective(
                     preprocessing_pipeline=preprocessing_pipeline,
@@ -267,6 +289,7 @@ class AutoMLEngine:
                     random_state=cfg.random_seed,
                     n_jobs=cfg.n_jobs,
                 )
+                obj.study_name = f"{dataset_key}_{task_family}_{self.task_info_.primary_metric}_{m_name}"
 
             opt_res = optimizer.optimize_model(obj, m_name)
             self.optimization_results_[m_name] = opt_res
@@ -322,28 +345,35 @@ class AutoMLEngine:
 
                 # Compute training partition performance & generalization diagnostics
                 try:
-                    if "classification" in task_family:
-                        from sklearn.metrics import accuracy_score
-                        train_s = float(accuracy_score(y_train, training_result.pipeline.predict(X_train)))
-                        metric_n = "accuracy"
-                        higher_better = True
-                    else:
-                        from sklearn.metrics import r2_score, mean_squared_error
-                        preds_tr = training_result.pipeline.predict(X_train)
-                        if self.task_info_.primary_metric in ("rmse", "mse", "mae"):
-                            train_s = float(np.sqrt(mean_squared_error(y_train, preds_tr))) if self.task_info_.primary_metric == "rmse" else float(mean_squared_error(y_train, preds_tr))
-                            metric_n = self.task_info_.primary_metric
-                            higher_better = False
+                    from sklearn.metrics import get_scorer
+                    metric_lower = self.task_info_.primary_metric.lower().removeprefix("neg_")
+                    higher_better = metric_lower not in {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}
+                    sklearn_scoring = {
+                        "rmse": "neg_root_mean_squared_error",
+                        "root_mean_squared_error": "neg_root_mean_squared_error",
+                        "mse": "neg_mean_squared_error",
+                        "mean_squared_error": "neg_mean_squared_error",
+                        "mae": "neg_mean_absolute_error",
+                        "mean_absolute_error": "neg_mean_absolute_error",
+                    }.get(self.task_info_.primary_metric.lower(), self.task_info_.primary_metric.lower())
+
+                    try:
+                        scorer = get_scorer(sklearn_scoring)
+                        raw_train_s = float(scorer(training_result.pipeline, X_train, y_train))
+                        train_s = -raw_train_s if (not higher_better and sklearn_scoring.startswith("neg_")) else raw_train_s
+                    except Exception:
+                        if "classification" in task_family:
+                            from sklearn.metrics import accuracy_score
+                            train_s = float(accuracy_score(y_train, training_result.pipeline.predict(X_train)))
                         else:
-                            train_s = float(r2_score(y_train, preds_tr))
-                            metric_n = "r2"
-                            higher_better = True
+                            from sklearn.metrics import r2_score
+                            train_s = float(r2_score(y_train, training_result.pipeline.predict(X_train)))
 
                     diag = auditor.evaluate_fit(
                         model_name=m_name,
                         train_score=train_s,
                         validation_score=cv_res.mean_score,
-                        metric_name=metric_n,
+                        metric_name=self.task_info_.primary_metric,
                         higher_is_better=higher_better,
                     )
                     self.candidate_diagnostics_[m_name] = diag
@@ -383,6 +413,10 @@ class AutoMLEngine:
                 "optimization_score": self.optimization_results_[result.model_name].best_score,
                 "optimization_trials": self.optimization_results_[result.model_name].n_trials,
                 "optimization_time_seconds": self.optimization_results_[result.model_name].elapsed_seconds,
+                "optimization_history": self.optimization_results_[result.model_name].optimization_history or [],
+                "optimization_study_name": self.optimization_results_[result.model_name].study_name,
+                "optimization_direction": self.optimization_results_[result.model_name].direction,
+                "parameter_importance": self.optimization_results_[result.model_name].parameter_importance or {},
                 "best_params": self.optimization_results_[result.model_name].best_params,
                 "cv_mean_score": result.mean_score,
                 "cv_std_score": result.std_score,
@@ -400,7 +434,8 @@ class AutoMLEngine:
 
         # ── Step 9: Model Ranking ─────────────────────────────────────────
         print("[AutoML] Step 9/11 - Ranking models & generating leaderboard...")
-        ranker = ModelRanker(higher_is_better=True)
+        minimize_metrics = {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}
+        ranker = ModelRanker(higher_is_better=self.task_info_.primary_metric.lower().removeprefix("neg_") not in minimize_metrics)
         self.ranked_models_ = ranker.rank(self.cv_results_, diagnostics=self.candidate_diagnostics_)
         print(ranker.leaderboard_str(self.ranked_models_))
 
@@ -432,12 +467,15 @@ class AutoMLEngine:
 
         if not is_unsupervised:
             y_pred = self.final_pipeline_.predict(X_holdout)
+            self.y_holdout_ = y_holdout.copy()
+            self.y_pred_holdout_ = np.asarray(y_pred)
             y_proba = None
             if task_family == "classification" and hasattr(self.final_pipeline_, "predict_proba"):
                 try:
                     y_proba = self.final_pipeline_.predict_proba(X_holdout)
                 except Exception:
                     y_proba = None
+            self.y_proba_holdout_ = np.asarray(y_proba) if y_proba is not None else None
 
             # Generate prediction series for visualization
             try:
@@ -464,6 +502,14 @@ class AutoMLEngine:
                 y_proba=y_proba,
                 n_features=X_holdout.shape[1],
             )
+            self.explainability_ = ExplainabilityService(random_state=cfg.random_seed).explain(
+                pipeline=self.final_pipeline_,
+                X_train=X_train,
+                X_holdout=X_holdout,
+                y_holdout=y_holdout,
+                task_type=self.task_info_.task_type,
+                scoring=self.task_info_.primary_metric,
+            )
             if sensitive_holdout is not None:
                 self.fairness_audit_ = FairnessAuditor().audit(
                     sensitive_holdout,
@@ -481,14 +527,7 @@ class AutoMLEngine:
         else:
             # Unsupervised holdout metrics
             fitted_est = self.final_pipeline_.named_steps["estimator"]
-            preprocessed_holdout = self.final_pipeline_.named_steps["feature_scaler"].transform(
-                self.final_pipeline_.named_steps["categorical_encoder"].transform(
-                    self.final_pipeline_.named_steps["missing_value_handler"].transform(
-                        self.final_pipeline_.named_steps["outlier_handler"].transform(X_holdout)
-                        if "outlier_handler" in self.final_pipeline_.named_steps else X_holdout
-                    )
-                )
-            )
+            preprocessed_holdout = self.final_pipeline_[:-1].transform(X_holdout)
             if hasattr(self.final_pipeline_, "predict"):
                 try:
                     holdout_preds = self.final_pipeline_.predict(X_holdout)
@@ -507,7 +546,12 @@ class AutoMLEngine:
             scores = None
             if hasattr(fitted_est, "decision_function"):
                 try:
-                    scores = fitted_est.decision_function(preprocessed_holdout)
+                    scores = -np.asarray(fitted_est.decision_function(preprocessed_holdout))
+                except Exception:
+                    scores = None
+            elif hasattr(fitted_est, "score_samples"):
+                try:
+                    scores = -np.asarray(fitted_est.score_samples(preprocessed_holdout))
                 except Exception:
                     scores = None
 
@@ -517,6 +561,24 @@ class AutoMLEngine:
                 y_pred=holdout_preds,
                 y_proba=scores,
             )
+            try:
+                from sklearn.decomposition import PCA
+                preprocessed_train = self.final_pipeline_[:-1].transform(X_train)
+                projector = PCA(n_components=2, random_state=cfg.random_seed).fit(preprocessed_train)
+                coordinates = projector.transform(preprocessed_holdout)
+                viz_idx = np.arange(len(coordinates))
+                if len(viz_idx) > 2000:
+                    viz_idx = np.random.default_rng(cfg.random_seed).choice(viz_idx, size=2000, replace=False)
+                self.unsupervised_visualization_ = {
+                    "points": [{"x": float(coordinates[i, 0]), "y": float(coordinates[i, 1]), "label": int(holdout_preds[i]), "score": float(scores[i]) if scores is not None else None} for i in viz_idx],
+                    "score_histogram": None,
+                    "diagnostic_only": True,
+                }
+                if scores is not None and len(scores):
+                    counts, edges = np.histogram(scores, bins=min(12, max(3, int(np.sqrt(len(scores))))))
+                    self.unsupervised_visualization_["score_histogram"] = [{"lower": float(edges[i]), "upper": float(edges[i + 1]), "count": int(counts[i])} for i in range(len(counts))]
+            except Exception:
+                self.unsupervised_visualization_ = {"points": [], "score_histogram": None, "diagnostic_only": True}
             self.fairness_audit_ = FairnessAuditResult(
                 status="not_run",
                 sensitive_columns=[],
@@ -563,9 +625,22 @@ class AutoMLEngine:
                 "holdout_metrics": self.holdout_metrics_.metrics,
                 "generalization_audit": self.generalization_audit_.__dict__ if self.generalization_audit_ else None,
                 "optimization_trials": trials_count,
+                "optimization_storage": cfg.optuna_storage_url or "sqlite study database",
+                "random_seed": cfg.random_seed,
+                "feature_schema": self.feature_columns_,
+                "training_rows": int(len(X_train)),
+                "training_configuration": {
+                    "test_size": cfg.test_size,
+                    "cv_folds": effective_cv_folds,
+                    "n_trials_per_model": trials_count,
+                    "timeout_seconds": cfg.optimization_timeout,
+                    "primary_metric": self.task_info_.primary_metric,
+                    "task_type": self.task_info_.task_type,
+                },
                 "final_training_time_seconds": self.final_training_time_seconds_,
                 "model_records": self.model_records_,
                 "fairness_audit": self.fairness_audit_.__dict__,
+                "explainability": self.explainability_,
             },
             filename=export_filename,
         )

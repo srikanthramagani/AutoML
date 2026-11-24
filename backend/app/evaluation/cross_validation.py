@@ -71,8 +71,11 @@ class CrossValidator:
 
         sklearn_scoring = {
             "rmse": "neg_root_mean_squared_error",
+            "root_mean_squared_error": "neg_root_mean_squared_error",
             "mse": "neg_mean_squared_error",
+            "mean_squared_error": "neg_mean_squared_error",
             "mae": "neg_mean_absolute_error",
+            "mean_absolute_error": "neg_mean_absolute_error",
         }.get(self.scoring.lower(), self.scoring)
 
         try:
@@ -88,6 +91,8 @@ class CrossValidator:
             valid_scores = scores[~np.isnan(scores)]
             if len(valid_scores) == 0:
                 raise ValueError("All cross-validation folds failed.")
+            if self.scoring.lower().removeprefix("neg_") in {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}:
+                valid_scores = -valid_scores
             error = None
             is_valid = True
         except Exception as exc:

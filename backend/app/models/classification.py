@@ -56,7 +56,7 @@ def get_classification_models(random_state: int = 42) -> List[Dict[str, Any]]:
         {
             "name": "svc",
             "estimator": SVC(
-                kernel="linear", probability=True, random_state=random_state
+                kernel="rbf", probability=True, random_state=random_state
             ),
             "tags": ["svm", "kernel"],
         },

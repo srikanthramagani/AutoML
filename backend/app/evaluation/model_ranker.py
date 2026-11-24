@@ -61,12 +61,15 @@ class ModelRanker:
                 if status == "overfitting" and gap > 0.12:
                     penalty = self.overfit_penalty_weight * (gap - 0.12)
                     score = (score - penalty) if self.higher_is_better else (score + penalty)
-            return (score, -r.std_score)
+            if self.higher_is_better:
+                return (score, -r.std_score)
+            else:
+                return (-score, -r.std_score)
 
         sorted_results = sorted(
             valid_results,
             key=sort_key,
-            reverse=self.higher_is_better,
+            reverse=True,
         )
 
         ranked = []

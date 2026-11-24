@@ -61,6 +61,7 @@ class Settings:
     # --- Optuna HPO ---
     n_trials: int = 50
     optimization_timeout: Optional[int] = None  # seconds
+    optuna_storage_url: Optional[str] = None
 
     # --- Evaluation & Task ---
     task: str = "auto"  # 'auto', 'classification', 'regression', 'clustering', 'anomaly_detection'

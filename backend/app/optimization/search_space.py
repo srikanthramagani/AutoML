@@ -59,9 +59,10 @@ class SearchSpace:
 
         def _random_forest(trial) -> Dict[str, Any]:
             return {
-                "n_estimators": trial.suggest_int("n_estimators", 50, 200, step=50),
-                "max_depth": trial.suggest_int("max_depth", 3, 15),
+                "n_estimators": trial.suggest_int("n_estimators", 50, 250, step=25),
+                "max_depth": trial.suggest_int("max_depth", 3, 20),
                 "min_samples_split": trial.suggest_int("min_samples_split", 2, 8),
+                "min_samples_leaf": trial.suggest_int("min_samples_leaf", 1, 4),
             }
 
         def _gradient_boosting(trial) -> Dict[str, Any]:
@@ -73,9 +74,14 @@ class SearchSpace:
             }
 
         def _svc(trial) -> Dict[str, Any]:
-            return {
-                "C": trial.suggest_float("C", 1e-2, 1e2, log=True)
+            kernel = trial.suggest_categorical("kernel", ["rbf", "linear"])
+            params = {
+                "C": trial.suggest_float("C", 1e-2, 1e3, log=True),
+                "kernel": kernel,
             }
+            if kernel == "rbf":
+                params["gamma"] = trial.suggest_categorical("gamma", ["scale", "auto"])
+            return params
 
         def _ridge(trial) -> Dict[str, Any]:
             return {
@@ -95,8 +101,9 @@ class SearchSpace:
 
         def _svr(trial) -> Dict[str, Any]:
             return {
-                "C": trial.suggest_float("C", 1e-2, 1e2, log=True),
-                "epsilon": trial.suggest_float("epsilon", 0.01, 0.5, log=True),
+                "C": trial.suggest_float("C", 1e-2, 5e2, log=True),
+                "epsilon": trial.suggest_float("epsilon", 0.005, 0.5, log=True),
+                "gamma": trial.suggest_categorical("gamma", ["scale", "auto"]),
             }
 
         def _xgboost(trial) -> Dict[str, Any]:
@@ -141,8 +148,9 @@ class SearchSpace:
 
         def _isolation_forest(trial) -> Dict[str, Any]:
             return {
-                "n_estimators": trial.suggest_int("n_estimators", 50, 150, step=25),
+                "n_estimators": trial.suggest_int("n_estimators", 100, 250, step=25),
                 "max_features": trial.suggest_float("max_features", 0.6, 1.0),
+                "max_samples": trial.suggest_float("max_samples", 0.6, 1.0),
             }
 
         def _one_class_svm(trial) -> Dict[str, Any]:

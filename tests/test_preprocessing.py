@@ -34,6 +34,14 @@ def test_missing_value_handler(sample_df):
     assert not res["cat_low"].isnull().any()
 
 
+def test_missing_value_handler_fractional_median_in_nullable_integer_column():
+    frame = pd.DataFrame({"num": pd.Series([100, pd.NA, 103], dtype="Int64")})
+
+    result = MissingValueHandler().fit_transform(frame)
+
+    assert result["num"].tolist() == [100.0, 101.5, 103.0]
+
+
 def test_pipeline_builder(sample_df):
     builder = PreprocessingPipelineBuilder()
     pipeline = builder.build()

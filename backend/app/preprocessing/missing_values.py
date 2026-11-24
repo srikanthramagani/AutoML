@@ -86,6 +86,14 @@ class MissingValueHandler(BaseEstimator, TransformerMixin):
         for col in self.numeric_cols_:
             if col in X_out.columns:
                 fill_val = self.numeric_impute_values_.get(col, 0.0)
+                # Nullable integer columns cannot hold a fractional median
+                # (for example, 101.5). Promote only in that case so imputation
+                # keeps the statistical median instead of truncating it.
+                if (
+                    pd.api.types.is_integer_dtype(X_out[col])
+                    and not float(fill_val).is_integer()
+                ):
+                    X_out[col] = X_out[col].astype(float)
                 X_out[col] = X_out[col].fillna(fill_val)
 
         # Impute categorical
