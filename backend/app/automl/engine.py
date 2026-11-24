@@ -67,6 +67,7 @@ class AutoMLEngine:
         self.y_proba_holdout_: Optional[np.ndarray] = None
         self.explainability_: Optional[Dict[str, Any]] = None
         self.unsupervised_visualization_: Optional[Dict[str, Any]] = None
+        self.comparison_graphs_: Optional[Dict[str, Any]] = None
 
     def fit(
         self,
@@ -101,7 +102,7 @@ class AutoMLEngine:
         else:
             target_col = load_result.target_column
         modality_report = detect_modalities(df, target=target_col)
-        if modality_report.text:
+        if modality_report.text and task_mode not in ("clustering", "anomaly_detection", "unsupervised"):
             raise ValueError(
                 "Natural-language columns were detected and cannot enter the tabular-only pipeline: "
                 f"{modality_report.text}. Use POST /api/multimodal/train or explicitly reassign the columns."
@@ -110,10 +111,13 @@ class AutoMLEngine:
         profiler = DataProfiler()
         self.profile_ = profiler.profile(df, target_column=target_col)
         keep_columns = set(keep_identifier_columns or [])
-        excluded_identifiers = [
-            column for column in self.profile_.identifier_columns
-            if column not in keep_columns and column != target_col
-        ]
+        if task_mode in ("clustering", "anomaly_detection", "unsupervised"):
+            excluded_identifiers = []
+        else:
+            excluded_identifiers = [
+                column for column in self.profile_.identifier_columns
+                if column not in keep_columns and column != target_col
+            ]
         self.profile_.identifier_columns = excluded_identifiers
 
         if target_col is not None and target_col in df.columns:
@@ -205,14 +209,107 @@ class AutoMLEngine:
                     raise ValueError("At least 2 training rows are required for cross-validation.")
         else:
             # Unsupervised split (no y target)
-            X_train, X_holdout = train_test_split(
-                X, test_size=cfg.test_size, random_state=cfg.random_seed
-            )
+            if self.task_info_.task_type == "clustering" and len(X) < 80:
+                X_train, X_holdout = X.copy(), None
+            elif self.task_info_.task_type == "clustering":
+                X_train, X_holdout = train_test_split(
+                    X, test_size=0.20, random_state=42
+                )
+            else:
+                X_train, X_holdout = train_test_split(
+                    X, test_size=cfg.test_size, random_state=cfg.random_seed
+                )
             y_train = y_holdout = None
             sensitive_train = sensitive_holdout = None
             effective_cv_folds = cfg.cv_folds
 
-        print(f"  Training samples: {len(X_train):,} | Holdout validation samples: {len(X_holdout):,}")
+        holdout_count = len(X_holdout) if X_holdout is not None else 0
+        print(f"  Training samples: {len(X_train):,} | Holdout validation samples: {holdout_count:,}")
+
+        if is_unsupervised and self.task_info_.task_type == "clustering":
+            from ..models.unsupervised import run_inductive_clustering_suite
+
+            try:
+                clustering_result = run_inductive_clustering_suite(X, X_train, X_holdout)
+            except Exception as exc:
+                raise RuntimeError(f"Clustering pipeline could not be initialized: {exc}") from exc
+
+            self.final_pipeline_ = clustering_result["pipeline"]
+            self.best_model_name_ = clustering_result["best_model"]
+            self.best_params_ = clustering_result["best_params"]
+            try:
+                graphs = clustering_result.get("comparison_graphs")
+                if not isinstance(graphs, dict):
+                    raise ValueError("Comparison graph payload is missing.")
+                for graph_key in (
+                    "model_comparison",
+                    "k_selection_curve",
+                    "pca_scatter_2d",
+                    "cluster_summary",
+                ):
+                    if graph_key not in graphs or not isinstance(graphs[graph_key], list):
+                        raise ValueError(f"Comparison graph '{graph_key}' is invalid.")
+                self.comparison_graphs_ = graphs
+            except Exception:
+                self.comparison_graphs_ = {
+                    "model_comparison": [],
+                    "k_selection_curve": [],
+                    "pca_scatter_2d": [],
+                    "cluster_summary": [],
+                }
+            self.holdout_metrics_ = MetricsResult(
+                model_name=self.best_model_name_,
+                task_type="clustering",
+                metrics=clustering_result["metrics"],
+            )
+            self.model_records_ = [
+                {
+                    "model_name": record["model_name"],
+                    "cv_mean_score": record["composite_score"],
+                    "cv_std_score": 0.0,
+                    "cv_folds": 1,
+                    "is_valid": True,
+                    "best_params": {"n_clusters": record["k"]},
+                }
+                for record in clustering_result["comparison_graphs"]["model_comparison"]
+            ]
+            self.ranked_models_ = []
+            self.fairness_audit_ = FairnessAuditResult(
+                status="not_run",
+                sensitive_columns=[],
+                groups={},
+                note="Fairness audit not applicable to unsupervised learning without ground truth labels.",
+            )
+            self.generalization_audit_ = GeneralizationDiagnostic(
+                model_name=self.best_model_name_,
+                status="not_run",
+                train_score=clustering_result["metrics"]["silhouette_score"],
+                validation_score=clustering_result["metrics"]["silhouette_score"],
+                holdout_score=clustering_result["metrics"]["silhouette_score"],
+                generalization_gap=0.0,
+                risk_level="low",
+                metric_name="silhouette_score",
+                explanation="Clustering uses inductive holdout evaluation.",
+            )
+            self.final_training_time_seconds_ = 0.0
+
+            exporter = ModelExporter(export_dir=cfg.export_dir)
+            self.export_path_ = exporter.export(
+                pipeline=self.final_pipeline_,
+                model_name=self.best_model_name_,
+                metadata={
+                    "task_type": "clustering",
+                    "primary_metric": "silhouette_score",
+                    "best_cv_score": clustering_result["metrics"]["silhouette_score"],
+                    "best_hyperparameters": self.best_params_,
+                    "holdout_metrics": clustering_result["metrics"],
+                },
+                filename=export_filename,
+            )
+            print("  Holdout Performance:")
+            for met_name, met_val in clustering_result["metrics"].items():
+                print(f"    - {met_name:<26}: {float(met_val):.4f}")
+            return self
 
         # ── Step 5: Build Preprocessing Pipeline ──────────────────────────
         print("[AutoML] Step 5/11 - Building preprocessing pipeline candidate...")
@@ -346,7 +443,8 @@ class AutoMLEngine:
                 # Compute training partition performance & generalization diagnostics
                 try:
                     from sklearn.metrics import get_scorer
-                    metric_lower = self.task_info_.primary_metric.lower().removeprefix("neg_")
+                    primary_metric_name = self.task_info_.primary_metric.lower()
+                    metric_lower = primary_metric_name[4:] if primary_metric_name.startswith("neg_") else primary_metric_name
                     higher_better = metric_lower not in {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}
                     sklearn_scoring = {
                         "rmse": "neg_root_mean_squared_error",
@@ -435,7 +533,9 @@ class AutoMLEngine:
         # ── Step 9: Model Ranking ─────────────────────────────────────────
         print("[AutoML] Step 9/11 - Ranking models & generating leaderboard...")
         minimize_metrics = {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}
-        ranker = ModelRanker(higher_is_better=self.task_info_.primary_metric.lower().removeprefix("neg_") not in minimize_metrics)
+        primary_metric_name = self.task_info_.primary_metric.lower()
+        normalized_primary_metric = primary_metric_name[4:] if primary_metric_name.startswith("neg_") else primary_metric_name
+        ranker = ModelRanker(higher_is_better=normalized_primary_metric not in minimize_metrics)
         self.ranked_models_ = ranker.rank(self.cv_results_, diagnostics=self.candidate_diagnostics_)
         print(ranker.leaderboard_str(self.ranked_models_))
 
@@ -449,7 +549,14 @@ class AutoMLEngine:
         winner_entry = next(m for m in model_pool if m["name"] == self.best_model_name_)
         winning_estimator = clone(winner_entry["estimator"])
         if self.best_params_:
-            winning_estimator.set_params(**self.best_params_)
+            valid_params = winning_estimator.get_params(deep=True)
+            compatible_params = {
+                key: value
+                for key, value in self.best_params_.items()
+                if key in valid_params
+            }
+            if compatible_params:
+                winning_estimator.set_params(**compatible_params)
 
         full_unfitted_pipeline = Pipeline(
             steps=list(preprocessing_pipeline.steps) + [("estimator", winning_estimator)]

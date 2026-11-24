@@ -1,13 +1,33 @@
 import { useEffect, useState } from 'react'
-import { startMultimodalTraining, uploadPredictionCsv, runForecast } from './services/api'
-import { Activity, ArrowUpRight, BarChart3, Database, Download, FlaskConical, UploadCloud } from 'lucide-react'
+import {
+  Activity,
+  ArrowLeft,
+  ArrowRight,
+  BarChart3,
+  Boxes,
+  ChevronDown,
+  Database,
+  Download,
+  FlaskConical,
+  Gauge,
+  Layers3,
+  Play,
+  Settings2,
+  Sparkles,
+  UploadCloud,
+} from 'lucide-react'
+import { runForecast, startMultimodalTraining, uploadPredictionCsv } from './services/api'
 import { useAutoML } from './hooks/useAutoML'
 import DatasetProfile from './components/DatasetProfile'
 import AnalysisPage from './pages/AnalysisPage'
 import ExportPage from './pages/ExportPage'
 import ForecastResultPanel from './components/ForecastResultPanel'
 
-const steps = ['Dataset', 'Profile', 'Configure', 'Results']
+const navigation = [
+  { id: 'run', label: 'Workspace', icon: Boxes },
+  { id: 'analysis', label: 'Analysis', icon: BarChart3, requiresJob: true },
+  { id: 'export', label: 'Export', icon: Download, requiresJob: true },
+]
 
 function App() {
   const { dataset, job, error, upload, train } = useAutoML()
@@ -29,6 +49,7 @@ function App() {
   const [predictionError, setPredictionError] = useState('')
   const [forecastTimeColumn, setForecastTimeColumn] = useState('')
   const [forecastHorizon, setForecastHorizon] = useState(7)
+  const [forecastModelFamily, setForecastModelFamily] = useState('ridge')
   const [forecastResult, setForecastResult] = useState(null)
   const [forecastError, setForecastError] = useState('')
 
@@ -44,23 +65,38 @@ function App() {
         .filter((column) => column.identifier_candidate && !column.identifier_excluded_by_default)
         .map((column) => column.name))
     } catch (requestError) {
-      if (task === 'time_series_forecasting') setForecastError(requestError.response?.data?.detail || requestError.message)
+      setForecastError(requestError.response?.data?.detail || requestError.message)
     }
   }
 
   async function handleTrain(event) {
     event.preventDefault()
     try {
+      setForecastError('')
       if (task === 'time_series_forecasting') {
-        const response = await runForecast({ dataset_id: dataset.id, target_column: target, datetime_column: forecastTimeColumn || null, horizon: Number(forecastHorizon), n_trials: Number(trials), cv_folds: Number(folds) })
+        const response = await runForecast({
+          dataset_id: dataset.id,
+          target_column: target,
+          datetime_column: forecastTimeColumn || null,
+          horizon: Number(forecastHorizon),
+          n_trials: Number(trials),
+          cv_folds: Number(folds),
+          model_family: forecastModelFamily,
+        })
         setForecastResult(response.data)
-        setForecastError('')
         setActiveStep(3)
         return
       }
       if (multimodal) {
-        const response = await startMultimodalTraining({dataset_id: dataset.id, target_column: target, representation, fusion, trials: Number(trials), cv_folds: Number(folds), overrides: columnOverrides})
-        // This API is synchronous today; present the actual completed result.
+        const response = await startMultimodalTraining({
+          dataset_id: dataset.id,
+          target_column: target,
+          representation,
+          fusion,
+          trials: Number(trials),
+          cv_folds: Number(folds),
+          overrides: columnOverrides,
+        })
         setMultimodalResult(response.data)
         setActiveStep(3)
         return
@@ -71,81 +107,275 @@ function App() {
         task,
         optimization_trials: Number(trials),
         cv_folds: Number(folds),
-        keep_identifier_columns: keptIdentifiers
+        keep_identifier_columns: keptIdentifiers,
       })
       setActiveStep(3)
-    } catch {
-      // The API contract is intentionally scaffold-only in this phase.
+    } catch (requestError) {
+      setForecastError(requestError.response?.data?.detail || requestError.message)
     }
   }
 
   useEffect(() => {
-    if (job?.status === 'complete') {
-      setActiveStep(3)
-      setView('analysis')
-    }
+    if (job?.status === 'complete') setActiveStep(3)
   }, [job?.status])
 
+  const steps = [
+    { label: 'Dataset', detail: 'CSV intake' },
+    { label: 'Profile', detail: 'Schema scan' },
+    { label: 'Configure', detail: 'Run settings' },
+    { label: 'Review', detail: 'Results' },
+  ]
+
   return (
-    <main className="shell">
-      <nav className="topbar">
-        <button className="brand" onClick={() => setView('run')}><span className="brand-mark"><FlaskConical size={17} /></span><span>adaptive / automl</span></button>
-        <div className="topnav"><button className={view === 'run' ? 'active' : ''} onClick={() => setView('run')}>Run workspace</button><button className={view === 'analysis' ? 'active' : ''} disabled={job?.status !== 'complete'} onClick={() => setView('analysis')}><BarChart3 size={14} /> Analysis</button><button className={view === 'export' ? 'active' : ''} disabled={job?.status !== 'complete'} onClick={() => setView('export')}><Download size={14} /> Export</button></div>
-        <div className="status"><span className="status-dot" /> phase 1 research workspace</div>
-      </nav>
+    <div className="app-shell">
+      <aside className="app-sidebar">
+        <button className="sidebar-brand" onClick={() => setView('run')} aria-label="Adaptive AutoML home">
+          <span className="brand-glyph"><FlaskConical size={18} /></span>
+          <span><strong>Adaptive</strong><small>AutoML Studio</small></span>
+        </button>
 
-      {view === 'analysis' && job?.status === 'complete' && <AnalysisPage job={job} dataset={dataset} onBack={() => setView('run')} onExport={() => setView('export')} />}
-      {view === 'export' && job?.status === 'complete' && <ExportPage job={job} dataset={dataset} onBack={() => setView('analysis')} />}
+        <nav className="sidebar-nav" aria-label="Primary navigation">
+          <p className="sidebar-label">Platform</p>
+          {navigation.map((item) => {
+            const Icon = item.icon
+            const disabled = item.requiresJob && job?.status !== 'complete'
+            return (
+              <button
+                key={item.id}
+                className={view === item.id ? 'sidebar-link active' : 'sidebar-link'}
+                disabled={disabled}
+                onClick={() => setView(item.id)}
+              >
+                <Icon size={17} />
+                <span>{item.label}</span>
+                {view === item.id && <span className="nav-indicator" />}
+              </button>
+            )
+          })}
+        </nav>
 
-      {view === 'run' && <><section className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">Tabular intelligence laboratory</p>
-          <h1>Turn a raw table into a <em>reproducible</em> model.</h1>
-          <p className="hero-text">Upload a CSV, inspect its shape, and prepare a complete preprocessing and model-search run.</p>
+        <div className="sidebar-status">
+          <span className="pulse-dot" />
+          <div><strong>Compute ready</strong><small>Local engine connected</small></div>
         </div>
-        <div className="hero-orbit"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><span>01</span></div>
-      </section>
+      </aside>
 
-      <section className="workspace">
-        <aside className="rail">
-          <p className="rail-label">Workflow</p>
-          {steps.map((step, index) => <button className={`rail-step ${activeStep === index ? 'active' : ''}`} key={step} onClick={() => setActiveStep(index)}><span>0{index + 1}</span>{step}<ArrowUpRight size={14} /></button>)}
-          <div className="rail-note"><Database size={16} /><p>Metadata only<br /><span>Files stay in storage.</span></p></div>
-        </aside>
+      <main className="app-main">
+        {view === 'analysis' && job?.status === 'complete' && (
+          <AnalysisPage job={job} dataset={dataset} onBack={() => setView('run')} onExport={() => setView('export')} />
+        )}
+        {view === 'export' && job?.status === 'complete' && (
+          <ExportPage job={job} dataset={dataset} onBack={() => setView('analysis')} />
+        )}
 
-        <section className="panel">
-          <header className="panel-header"><div><p className="eyebrow">01 / dataset intake</p><h2>Start with your dataset</h2></div><Activity size={20} className="muted-icon" /></header>
-          <label className="dropzone"><input type="file" accept=".csv,text/csv" onChange={handleUpload} /><UploadCloud size={27} /><strong>{file ? file.name : 'Drop a CSV here or browse'}</strong><span>{file ? `${(file.size / 1024).toFixed(1)} KB ready for inspection` : 'CSV files only · maximum 50 MB'}</span></label>
+        {view === 'run' && (
+          <>
+            <header className="workspace-header">
+              <div>
+                <div className="breadcrumb"><span>Projects</span><span>/</span><strong>New experiment</strong></div>
+                <h1>Model workspace</h1>
+              </div>
+              <div className="header-actions">
+                {job?.status && <span className={`run-status ${job.status}`}><Activity size={14} /> {job.status}</span>}
+                <button className="icon-button" aria-label="Workspace settings"><Settings2 size={18} /></button>
+              </div>
+            </header>
 
-          {dataset && <DatasetProfile dataset={dataset} keptIdentifiers={keptIdentifiers} onKeepIdentifier={(columnName, keep) => setKeptIdentifiers((current) => keep ? [...new Set([...current, columnName])] : current.filter((name) => name !== columnName))} />}
-          {dataset?.modality_report && <div className="modality-summary"><strong>Detected modalities</strong><div>{Object.entries(dataset.modality_report).filter(([key, value]) => Array.isArray(value) && key !== 'high_cardinality').map(([kind, columns]) => <p key={kind}><span>{kind.replace('_', ' ')}</span> {columns.length ? columns.join(', ') : 'None detected'}</p>)}</div><small>Review the text and identifier assignments before multimodal training. Overrides are available through the API.</small></div>}
-          {dataset?.column_details && <details className="modality-summary"><summary>Manually reassign columns</summary>{dataset.column_details.filter((column) => column.name !== target).map((column) => <label className="override-row" key={column.name}><span>{column.name} · {column.inferred_type}</span><select value={columnOverrides[column.name] || ''} onChange={(event) => setColumnOverrides((state) => ({...state,[column.name]:event.target.value}))}><option value="">Automatic</option>{['numerical','categorical','boolean','datetime','text','identifiers','exclude'].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>)}</details>}
+            <section className="progress-card" aria-label="Experiment progress">
+              {steps.map((step, index) => (
+                <button
+                  type="button"
+                  key={step.label}
+                  className={`progress-step ${activeStep === index ? 'active' : ''} ${activeStep > index ? 'complete' : ''}`}
+                  onClick={() => setActiveStep(index)}
+                >
+                  <span className="step-number">{activeStep > index ? '✓' : String(index + 1).padStart(2, '0')}</span>
+                  <span><strong>{step.label}</strong><small>{step.detail}</small></span>
+                </button>
+              ))}
+            </section>
 
-          <div className="section-rule" />
-          <form onSubmit={handleTrain} className="config-grid">
-            <div className="field wide"><label htmlFor="target">Target column</label><input id="target" value={target} onChange={(event) => setTarget(event.target.value)} placeholder="e.g. churn, price" /><small>Leave blank to let the loader use the final column.</small></div>
-            <div className="field wide"><label className="inline-choice"><input type="checkbox" checked={multimodal} onChange={(e) => setMultimodal(e.target.checked)} /> Train tabular + text model</label><small>Uses detected text fields, validation folds, Optuna model selection, and exports the full pipeline.</small></div>
-            {multimodal && <><div className="field"><label htmlFor="representation">Text representation</label><select id="representation" value={representation} onChange={(e) => setRepresentation(e.target.value)}><option value="auto">Automatic selection</option><option value="tfidf">TF-IDF</option><option value="sentence_transformer">Sentence Transformer (optional package)</option></select></div><div className="field"><label htmlFor="fusion">Fusion strategy</label><select id="fusion" value={fusion} onChange={(e) => setFusion(e.target.value)}><option value="auto">Automatic selection</option><option value="early">Early fusion</option><option value="late">Late fusion</option></select></div></>}
-            <div className="field"><label htmlFor="folds">CV folds</label><input id="folds" type="number" min="2" value={folds} onChange={(event) => setFolds(event.target.value)} /></div>
-            <div className="field"><label htmlFor="trials">Optimization trials</label><input id="trials" type="number" min="1" value={trials} onChange={(event) => setTrials(event.target.value)} /></div>
-            <div className="field"><label htmlFor="metric">Evaluation metric</label><select id="metric" value={metric} onChange={(event) => setMetric(event.target.value)}><option value="auto">Auto detect</option><option value="roc_auc">ROC-AUC</option><option value="f1_weighted">F1 weighted</option><option value="r2">R²</option><option value="silhouette_score">Silhouette Score (Clustering)</option></select></div>
-            <div className="field"><label>Task family</label><div className="segmented"><button type="button" className={task === 'auto' ? 'selected' : ''} onClick={() => setTask('auto')}>Auto</button><button type="button" className={task === 'classification' ? 'selected' : ''} onClick={() => setTask('classification')}>Classify</button><button type="button" className={task === 'regression' ? 'selected' : ''} onClick={() => setTask('regression')}>Regress</button><button type="button" className={task === 'clustering' ? 'selected' : ''} onClick={() => setTask('clustering')}>Cluster</button><button type="button" className={task === 'time_series_forecasting' ? 'selected' : ''} onClick={() => setTask('time_series_forecasting')}>Forecast</button></div></div>
-            {task === 'time_series_forecasting' && <><div className="field"><label htmlFor="time-column">Datetime column (optional)</label><input id="time-column" value={forecastTimeColumn} onChange={(event) => setForecastTimeColumn(event.target.value)} placeholder="e.g. timestamp" /></div><div className="field"><label htmlFor="forecast-horizon">Forecast horizon</label><input id="forecast-horizon" type="number" min="1" max="90" value={forecastHorizon} onChange={(event) => setForecastHorizon(event.target.value)} /></div></>}
-            <button className="primary-action" disabled={!file} type="submit">Prepare training run <ArrowUpRight size={16} /></button>
-          </form>
-          {error && <div className="notice">{error}</div>}
-          {job && <div className={`notice ${job.status === 'complete' ? 'success' : ''}`}>Run status: {job.status}{job.best_model ? ` · Best model: ${job.best_model}` : ''}</div>}
-          {multimodalResult && <div className="completion-card"><BarChart3 size={17} /><div><strong>Multimodal validation complete · {multimodalResult.selected_model}</strong><p>CV macro F1 {Number(multimodalResult.cv_score).toFixed(3)} · holdout accuracy {Number(multimodalResult.metrics?.accuracy).toFixed(3)} · {multimodalResult.representation} / {multimodalResult.fusion} fusion.</p><label className="upload-predictions">Predict unseen CSV<input type="file" accept=".csv" onChange={async (event) => {try {setPredictionError(''); const result=await uploadPredictionCsv(multimodalResult.job_id,event.target.files[0]); setPredictionOutput(result.data)} catch(err) {setPredictionError(err.response?.data?.detail || err.message)}}} /></label>{predictionOutput && <><span>{predictionOutput.rows} predictions ready.</span><a href={predictionOutput.prediction_download}>Download predictions CSV</a></>}{predictionError && <span className="notice">{predictionError}</span>}<a className="primary-action compact" href={`/api/models/${multimodalResult.job_id}/download`}>Download pipeline</a></div></div>}
-          {job?.error && <div className="notice">{job.error}</div>}
-          {forecastError && <div className="notice">{forecastError}</div>}
-          {forecastResult && <ForecastResultPanel result={forecastResult} />}
-          {job?.status === 'complete' && <div className="completion-card"><BarChart3 size={17} /><div><strong>Analysis is ready</strong><p>{job.best_model} was selected. Open the Analysis page for the full comparison and Export for the trained pipeline.</p></div><button className="primary-action compact" onClick={() => setView('analysis')}>Open analysis <ArrowUpRight size={15} /></button></div>}
-        </section>
-      </section>
-      </>}
+            <div className="workspace-grid">
+              <section className="workspace-content">
+                <div className="section-heading-row">
+                  <div>
+                    <p className="kicker">01 · Data source</p>
+                    <h2>Build a training run</h2>
+                  </div>
+                  {dataset && <span className="secure-badge"><Database size={14} /> Profiled successfully</span>}
+                </div>
 
-      <footer><span>Adaptive AutoML Platform</span><span>Preprocessing → candidates → validation → export</span><span>v0.1 / scaffold</span></footer>
-    </main>
+                <label className={`upload-zone ${file ? 'has-file' : ''}`}>
+                  <input type="file" accept=".csv,text/csv" onChange={handleUpload} />
+                  <span className="upload-icon"><UploadCloud size={22} /></span>
+                  <span className="upload-copy">
+                    <strong>{file ? file.name : 'Drop in a CSV dataset'}</strong>
+                    <small>{file ? `${(file.size / 1024).toFixed(1)} KB · ready for profiling` : 'or click to browse · .csv up to 50 MB'}</small>
+                  </span>
+                  <span className="browse-button">{file ? 'Replace' : 'Browse'} <ArrowRight size={15} /></span>
+                </label>
+                <p className="notice">Use a real CSV with documented rows and columns. Repository datasets are available under <code>datasets/</code>; synthetic benchmark data is not used for this training workflow.</p>
+
+                {dataset && (
+                  <DatasetProfile
+                    dataset={dataset}
+                    keptIdentifiers={keptIdentifiers}
+                    onKeepIdentifier={(columnName, keep) =>
+                      setKeptIdentifiers((current) => keep
+                        ? [...new Set([...current, columnName])]
+                        : current.filter((name) => name !== columnName))}
+                  />
+                )}
+
+                {dataset?.modality_report && (
+                  <div className="modality-summary">
+                    <div className="analysis-title"><Layers3 size={15} /><span>Modality detection</span></div>
+                    <div className="modality-grid">
+                      {Object.entries(dataset.modality_report)
+                        .filter(([key, value]) => Array.isArray(value) && key !== 'high_cardinality')
+                        .map(([kind, columns]) => (
+                          <div key={kind}><span>{kind.replaceAll('_', ' ')}</span><strong>{columns.length ? columns.join(', ') : 'None detected'}</strong></div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                {dataset?.column_details && (
+                  <details className="column-overrides">
+                    <summary>Review column assignments <ChevronDown size={15} /></summary>
+                    <div className="override-list">
+                      {dataset.column_details.filter((column) => column.name !== target).map((column) => (
+                        <label className="override-row" key={column.name}>
+                          <span><strong>{column.name}</strong><small>{column.inferred_type}</small></span>
+                          <select
+                            value={columnOverrides[column.name] || ''}
+                            onChange={(event) => setColumnOverrides((state) => ({ ...state, [column.name]: event.target.value }))}
+                          >
+                            <option value="">Automatic</option>
+                            {['numerical', 'categorical', 'boolean', 'datetime', 'text', 'identifiers', 'exclude'].map((item) => (
+                              <option key={item} value={item}>{item}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </section>
+
+              <aside className="run-config">
+                <div className="config-header">
+                  <div><p className="kicker">02 · Configuration</p><h3>Run settings</h3></div>
+                  <Gauge size={18} />
+                </div>
+
+                <form onSubmit={handleTrain}>
+                  <label className="config-field">
+                    <span>Target column</span>
+                    <input value={target} onChange={(event) => setTarget(event.target.value)} placeholder={dataset ? dataset.target || 'Select a column' : 'Upload dataset first'} />
+                  </label>
+
+                  <div className="config-field">
+                    <span>Task type</span>
+                    <select value={task} onChange={(event) => setTask(event.target.value)}>
+                      <option value="auto">Auto-detect</option>
+                      <option value="classification">Classification</option>
+                      <option value="regression">Regression</option>
+                      <option value="clustering">Clustering</option>
+                      <option value="time_series_forecasting">Time-series forecasting</option>
+                    </select>
+                  </div>
+
+                  <div className="config-two">
+                    <label className="config-field"><span>Trials</span><input type="number" min="1" value={trials} onChange={(event) => setTrials(event.target.value)} /></label>
+                    <label className="config-field"><span>CV folds</span><input type="number" min="2" value={folds} onChange={(event) => setFolds(event.target.value)} /></label>
+                  </div>
+
+                  <label className="config-field">
+                    <span>Metric</span>
+                    <select value={metric} onChange={(event) => setMetric(event.target.value)}>
+                      <option value="auto">Auto detect</option>
+                      <option value="roc_auc">ROC-AUC</option>
+                      <option value="f1_weighted">F1 weighted</option>
+                      <option value="r2">R²</option>
+                      <option value="silhouette_score">Silhouette</option>
+                    </select>
+                  </label>
+
+                  <label className="toggle-row">
+                    <span><strong>Tabular + text classification</strong><small>Combine structured columns with written text</small></span>
+                    <input type="checkbox" checked={multimodal} onChange={(event) => setMultimodal(event.target.checked)} />
+                  </label>
+
+                  {multimodal && (
+                    <div className="multimodal-options">
+                      <label className="config-field"><span>Text representation</span><select value={representation} onChange={(event) => setRepresentation(event.target.value)}><option value="auto">Let AutoML choose</option><option value="tfidf">TF-IDF — fast, interpretable word patterns</option><option value="sentence_transformer">Sentence transformer — semantic meaning</option></select></label>
+                      <label className="config-field"><span>Fusion strategy</span><select value={fusion} onChange={(event) => setFusion(event.target.value)}><option value="auto">Let AutoML choose</option><option value="early">Early fusion — combine features before one model</option><option value="late">Late fusion — train separate branches, then blend probabilities</option></select></label>
+                      <p className="notice">Early fusion is usually simplest and works well with TF-IDF. Late fusion is useful when tabular and text signals should remain independent before a calibrated probability blend.</p>
+                    </div>
+                  )}
+
+                  {task === 'time_series_forecasting' && (
+                    <>
+                      <div className="config-two">
+                        <label className="config-field"><span>Datetime column</span><input value={forecastTimeColumn} onChange={(event) => setForecastTimeColumn(event.target.value)} placeholder="Optional — leave blank for row order" /></label>
+                        <label className="config-field"><span>Horizon</span><input type="number" min="1" max="90" value={forecastHorizon} onChange={(event) => setForecastHorizon(event.target.value)} /></label>
+                      </div>
+                      <label className="config-field">
+                        <span>Forecast model</span>
+                        <select value={forecastModelFamily} onChange={(event) => setForecastModelFamily(event.target.value)}>
+                          <option value="ridge">Ridge — fast, stable baseline</option>
+                          <option value="lstm">LSTM — sequence learning</option>
+                          <option value="bilstm">Bidirectional LSTM — learns both directions of each sequence</option>
+                          <option value="bilstm_stack">Stacked Bidirectional LSTM — deeper sequence representation</option>
+                        </select>
+                      </label>
+                      <p className="notice">The forecast uses chronological holdout data and compares against a last-value baseline. Neural models require the optional TensorFlow forecasting dependency.</p>
+                    </>
+                  )}
+
+                  <button className="launch-button" disabled={!file} type="submit">
+                    <span><Play size={17} fill="currentColor" /> Launch experiment</span>
+                    <ArrowRight size={17} />
+                  </button>
+                </form>
+
+                {(error || forecastError) && <div className="notice error">{forecastError || error}</div>}
+              </aside>
+            </div>
+
+            {job && (
+              <section className={`job-banner ${job.status}`}>
+                <div className="job-icon"><Sparkles size={18} /></div>
+                <div><strong>{job.status === 'complete' ? 'Experiment complete' : `Experiment ${job.status}`}</strong><small>{job.best_model ? `Champion model · ${job.best_model}` : `Job ${job.job_id?.slice(0, 8) || 'pending'}`}</small></div>
+                {job.status === 'complete' && <button onClick={() => setView('analysis')}>View analysis <ArrowRight size={15} /></button>}
+              </section>
+            )}
+
+            {job?.error && <div className="notice error">{job.error}</div>}
+            {forecastResult && <ForecastResultPanel result={forecastResult} />}
+
+            {multimodalResult && (
+              <section className="job-banner complete multimodal-banner">
+                <div className="job-icon"><BarChart3 size={18} /></div>
+                <div><strong>{multimodalResult.selected_model}</strong><small>Tabular + text · CV score {Number(multimodalResult.cv_score).toFixed(3)} · {multimodalResult.representation === 'tfidf' ? 'TF-IDF text features' : 'Sentence transformer'} · {multimodalResult.fusion === 'early' ? 'Early fusion' : 'Late probability fusion'} </small></div>
+                <label className="text-upload">Predict CSV<input type="file" accept=".csv" onChange={async (event) => {
+                  try {
+                    setPredictionError('')
+                    const result = await uploadPredictionCsv(multimodalResult.job_id, event.target.files[0])
+                    setPredictionOutput(result.data)
+                  } catch (requestError) {
+                    setPredictionError(requestError.response?.data?.detail || requestError.message)
+                  }
+                }} /></label>
+                {predictionOutput && <a className="banner-action" href={predictionOutput.prediction_download}>Download {predictionOutput.rows} predictions</a>}
+                {predictionError && <span className="notice error">{predictionError}</span>}
+              </section>
+            )}
+          </>
+        )}
+      </main>
+    </div>
   )
 }
 

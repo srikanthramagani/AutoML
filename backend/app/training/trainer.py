@@ -46,7 +46,10 @@ class Trainer:
         hyperparams = hyperparams or {}
         est = clone(estimator)
         if hyperparams:
-            est.set_params(**hyperparams)
+            valid_params = est.get_params(deep=True)
+            compatible_params = {key: value for key, value in hyperparams.items() if key in valid_params}
+            if compatible_params:
+                est.set_params(**compatible_params)
 
         full_pipeline = Pipeline(
             steps=list(preprocessing_pipeline.steps) + [("estimator", est)]

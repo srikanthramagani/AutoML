@@ -1,7 +1,8 @@
 """Optional group fairness diagnostics for classification holdout predictions."""
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -11,7 +12,7 @@ from sklearn.metrics import recall_score
 @dataclass
 class FairnessAuditResult:
     status: str
-    sensitive_columns: list[str]
+    sensitive_columns: List[str]
     groups: Dict[str, Dict[str, float]]
     demographic_parity_difference: Optional[float] = None
     equal_opportunity_difference: Optional[float] = None
@@ -26,7 +27,7 @@ class FairnessAuditor:
         sensitive_values: pd.DataFrame,
         y_true: Any,
         y_pred: Any,
-        sensitive_columns: list[str],
+        sensitive_columns: List[str],
     ) -> FairnessAuditResult:
         if len(sensitive_values) != len(y_true) or len(y_true) != len(y_pred):
             raise ValueError("Fairness inputs must contain the same number of rows.")

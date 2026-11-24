@@ -1,4 +1,5 @@
 """Fixed-origin multi-step forecasting endpoint."""
+from __future__ import annotations
 
 from pathlib import Path
 from uuid import uuid4
@@ -7,7 +8,7 @@ from typing import Optional
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..models.forecasting import DirectTimeSeriesForecaster
 from ..config.settings import backend_settings
@@ -18,14 +19,16 @@ router = APIRouter()
 
 
 class ForecastRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     dataset_id: str
     target_column: str
-    datetime_column: str | None = None
-    frequency: str | None = None
+    datetime_column: Optional[str] = None
+    frequency: Optional[str] = None
     horizon: int = Field(default=7, ge=1, le=90)
     n_trials: int = Field(default=10, ge=1, le=50)
     cv_folds: int = Field(default=3, ge=2, le=8)
     random_seed: int = 42
+    model_family: str = Field(default="ridge")
 
 
 @router.post("/forecast/run")
@@ -40,6 +43,7 @@ def run_forecast(request: ForecastRequest) -> dict:
             n_trials=request.n_trials,
             cv_folds=request.cv_folds,
             random_state=request.random_seed,
+            model_family=request.model_family,
         )
         result = forecaster.fit_evaluate(
             frame,
@@ -50,7 +54,7 @@ def run_forecast(request: ForecastRequest) -> dict:
         model_id = uuid4().hex
         artifact_path = ModelExporter(str(PROJECT_ROOT / backend_settings.model_directory)).export(
             pipeline=forecaster,
-            model_name="DirectTimeSeriesForecaster(Ridge)",
+            model_name=f"DirectTimeSeriesForecaster({request.model_family.upper()})",
             filename=f"forecast_{model_id}",
             metadata={
                 "artifact_type": "direct_time_series_forecaster",
@@ -64,7 +68,7 @@ def run_forecast(request: ForecastRequest) -> dict:
         JOBS[model_id] = {
             "job_id": model_id,
             "status": "complete",
-            "best_model": "DirectTimeSeriesForecaster(Ridge)",
+            "best_model": f"DirectTimeSeriesForecaster({request.model_family.upper()})",
             "model_path": artifact_path,
             "metrics": result["metrics"],
             "forecast_config": result["config"],

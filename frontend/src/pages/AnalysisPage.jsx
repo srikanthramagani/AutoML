@@ -1,5 +1,4 @@
-import { useState } from 'react'
-import { ArrowLeft, Download, ExternalLink, LineChart, Sparkles, Layers, Sliders, Database, Cpu } from 'lucide-react'
+import { ArrowLeft, Download, ExternalLink, LineChart, Sparkles, Layers } from 'lucide-react'
 import TrainingResults from '../components/TrainingResults'
 import TrajectoryChart from '../components/TrajectoryChart'
 import ResidualChart from '../components/ResidualChart'
@@ -9,7 +8,7 @@ export default function AnalysisPage({ job, dataset, onBack, onExport }) {
   if (!job) return null
 
   return (
-    <main className="product-page max-w-7xl mx-auto px-4 py-8">
+    <main className="analysis-workbench product-page max-w-7xl mx-auto px-4 py-8">
       {/* Top Action Bar */}
       <div className="flex items-center justify-between border-b border-slate-200/80 pb-4 mb-6">
         <button
@@ -174,10 +173,10 @@ export default function AnalysisPage({ job, dataset, onBack, onExport }) {
               <LineChart size={18} className="text-indigo-600" />
               <div>
                 <h3 className="text-sm font-bold text-slate-900">
-                  Statistical Leaderboard Distribution
+                  Model Comparison Dashboard
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Publication-grade horizontal bar visualization generated with Seaborn & Matplotlib
+                  Publication-grade Seaborn & Matplotlib analysis of validation, fit, risk, and compute
                 </p>
               </div>
             </div>

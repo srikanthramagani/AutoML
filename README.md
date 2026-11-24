@@ -26,7 +26,7 @@ npm run dev
 
 Optuna studies default to `experiments/optuna_studies.db`. You can set `Settings.optuna_storage_url` to another Optuna-compatible storage URL. Uploaded files and model artifacts use the paths configured in `backend/app/config/settings.py`.
 
-Install optional SHAP/LIME support with `python -m pip install -r backend\requirements-explainability.txt`. Run the reproducible experiments with `.venv\Scripts\python.exe experiments\run_multi_dataset_experiments.py`; the runner writes CSV and PNG artifacts under `experiments/results/` using sklearn datasets and documented synthetic data.
+Install optional SHAP/LIME support with `python -m pip install -r backend\requirements-explainability.txt`. Install recurrent forecasting support with `python -m pip install -r backend\requirements-forecasting.txt`. The interactive application uses uploaded or repository datasets under `datasets/`; synthetic data is restricted to explicitly labeled benchmark experiment scripts and is not used as a substitute for user CSV training.
 
 ## Tests
 

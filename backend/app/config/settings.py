@@ -105,8 +105,14 @@ class BackendSettings(BaseSettings):
     upload_directory: str = "backend/uploads"
     model_directory: str = "backend/trained_models"
     experiment_directory: str = "backend/experiments"
+    api_keys: str = ""
+    default_owner_id: str = "local"
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        protected_namespaces=("settings_",),
+    )
 
 
 backend_settings = BackendSettings()

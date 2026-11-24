@@ -1,11 +1,11 @@
-"""
-DataProfiler
+"""DataProfiler
 ============
 Responsibility: Compute a comprehensive statistical profile of a raw DataFrame.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import re
 import numpy as np
 import pandas as pd
@@ -176,7 +176,7 @@ class DataProfiler:
         n_unique: int,
         pct_unique: float,
         is_target: bool,
-    ) -> tuple[bool, bool, Optional[str]]:
+    ) -> Tuple[bool, bool, Optional[str]]:
         if is_target:
             return False, False, None
 

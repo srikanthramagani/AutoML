@@ -99,8 +99,7 @@ class UnsupervisedMetricsCalculator:
             metrics["calinski_harabasz_score"] = 0.0
             metrics["davies_bouldin_score"] = 999.0
 
-        if -1 in unique_labels:
-            metrics["noise_ratio"] = float(np.mean(labels == -1))
+        metrics["noise_ratio"] = float(np.mean(labels == -1))
 
         return UnsupervisedMetricsResult(
             model_name=model_name,

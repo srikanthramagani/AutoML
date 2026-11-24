@@ -1,15 +1,19 @@
 """Model metadata endpoint."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
 from .state import JOBS
+from .auth import get_owner_id
 
 router = APIRouter()
 
 
 @router.get("/models/{model_id}")
-def get_model_metadata(model_id: str) -> dict:
+def get_model_metadata(
+    model_id: str,
+    _owner_id: str = Depends(get_owner_id),
+) -> dict:
     job = JOBS.get(model_id)
     if job is None or job.get("status") != "complete":
         raise HTTPException(status_code=404, detail="Model not found.")

@@ -1,6 +1,11 @@
 """Modality inspection and multimodal training/prediction endpoints."""
+from __future__ import annotations
 from pathlib import Path
-from importlib.metadata import version, PackageNotFoundError
+try:
+    from importlib.metadata import version, PackageNotFoundError
+except ImportError:
+    from importlib_metadata import version, PackageNotFoundError
+from typing import Dict, List
 import json
 from uuid import uuid4
 import pandas as pd
@@ -22,7 +27,7 @@ class MultimodalRequest(BaseModel):
     fusion:str="early"
     trials:int=Field(6,ge=1,le=24)
     cv_folds:int=Field(3,ge=2,le=10)
-    overrides:dict[str,str]=Field(default_factory=dict)
+    overrides:Dict[str,str]=Field(default_factory=dict)
     seed:int=42
 
 @router.get("/datasets/{dataset_id}/modalities")
@@ -59,7 +64,7 @@ def multimodal_train(req:MultimodalRequest):
     except Exception as exc: raise HTTPException(400,str(exc)) from exc
 
 @router.post("/models/{model_id}/predict")
-def predict(model_id:str,records:list[dict]):
+def predict(model_id:str,records:List[dict]):
     job=JOBS.get(model_id)
     if not job or not job.get("model_path"): raise HTTPException(404,"Model not found")
     try:
@@ -70,7 +75,7 @@ def predict(model_id:str,records:list[dict]):
     except Exception as exc: raise HTTPException(400,str(exc)) from exc
 
 @router.post("/models/{model_id}/explain")
-def explain(model_id:str,records:list[dict]):
+def explain(model_id:str,records:List[dict]):
     job=JOBS.get(model_id)
     if not job or not job.get("model_path"): raise HTTPException(404,"Model not found")
     try:

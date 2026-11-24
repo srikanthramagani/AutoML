@@ -86,12 +86,13 @@ class CrossValidator:
                 cv=cv,
                 scoring=sklearn_scoring,
                 error_score=np.nan,
-                n_jobs=self.n_jobs,
+                n_jobs=1,
             )
             valid_scores = scores[~np.isnan(scores)]
             if len(valid_scores) == 0:
                 raise ValueError("All cross-validation folds failed.")
-            if self.scoring.lower().removeprefix("neg_") in {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}:
+            metric_name = self.scoring.lower()[4:] if self.scoring.lower().startswith("neg_") else self.scoring.lower()
+            if metric_name in {"rmse", "mse", "mae", "root_mean_squared_error", "mean_squared_error", "mean_absolute_error"}:
                 valid_scores = -valid_scores
             error = None
             is_valid = True

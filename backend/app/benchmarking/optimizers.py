@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import optuna
@@ -29,7 +29,8 @@ def _scorer_name(metric: str) -> str:
 
 
 def _actual_score(score: float, metric: str) -> float:
-    return -float(score) if metric.lower().removeprefix("neg_") in _ERROR_METRICS else float(score)
+    metric_name = metric.lower()[4:] if metric.lower().startswith("neg_") else metric.lower()
+    return -float(score) if metric_name in _ERROR_METRICS else float(score)
 
 
 def _suggest(trial: optuna.Trial, space: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
@@ -97,7 +98,7 @@ def compare_optimizers(
     cv: Any,
     budget: int = 12,
     random_state: int = 42,
-    timeout: float | None = None,
+    timeout: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Compare optimizers on fixed train/test data, pipeline, CV, and parameter bounds."""
     if budget < 1:
@@ -105,7 +106,8 @@ def compare_optimizers(
     if any("grid" not in spec or not spec["grid"] for spec in space.values()):
         raise ValueError("Controlled comparisons require a non-empty finite 'grid' for every parameter so all optimizers search identical configurations.")
     scorer = _scorer_name(metric)
-    direction = "minimize" if metric.lower().removeprefix("neg_") in _ERROR_METRICS else "maximize"
+    metric_name = metric.lower()[4:] if metric.lower().startswith("neg_") else metric.lower()
+    direction = "minimize" if metric_name in _ERROR_METRICS else "maximize"
     total_configurations = int(np.prod([len(spec["grid"]) for spec in space.values()]))
     effective_budget = min(budget, total_configurations)
     results: List[Dict[str, Any]] = []

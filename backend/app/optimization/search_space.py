@@ -165,11 +165,20 @@ class SearchSpace:
             }
 
         def _time_series_gb(trial) -> Dict[str, Any]:
-            return {
-                "max_iter": trial.suggest_int("max_iter", 100, 250, step=50),
-                "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.2, log=True),
-                "max_depth": trial.suggest_int("max_depth", 3, 8),
-            }
+            try:
+                from sklearn.ensemble import HistGradientBoostingRegressor
+                HistGradientBoostingRegressor(max_iter=100, learning_rate=0.08)
+                return {
+                    "max_iter": trial.suggest_int("max_iter", 100, 250, step=50),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.2, log=True),
+                    "max_depth": trial.suggest_int("max_depth", 3, 8),
+                }
+            except (ImportError, TypeError):
+                return {
+                    "n_estimators": trial.suggest_int("n_estimators", 100, 250, step=50),
+                    "learning_rate": trial.suggest_float("learning_rate", 0.02, 0.2, log=True),
+                    "max_depth": trial.suggest_int("max_depth", 3, 8),
+                }
 
         def _time_series_xgb(trial) -> Dict[str, Any]:
             return {

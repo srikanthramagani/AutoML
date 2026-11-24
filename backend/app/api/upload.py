@@ -3,13 +3,14 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from ..config.settings import backend_settings
 from ..data.loader import DataLoader
 from ..data.profiler import DataProfiler
 from ..data.modalities import detect_modalities
 from .state import DATASETS, PROJECT_ROOT
+from .auth import get_owner_id
 
 router = APIRouter()
 
@@ -51,7 +52,10 @@ def _profile_response(profile, target: str) -> dict:
 
 
 @router.post("/upload")
-async def upload_dataset(file: UploadFile = File(...)) -> dict:
+async def upload_dataset(
+    file: UploadFile = File(...),
+    _owner_id: str = Depends(get_owner_id),
+) -> dict:
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are supported.")
 

@@ -5,7 +5,11 @@ Responsibility: Define and return candidate models tuned for temporal/time-serie
 """
 
 from typing import Any, Dict, List
-from sklearn.ensemble import GradientBoostingRegressor, HistGradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+try:
+    from sklearn.ensemble import HistGradientBoostingRegressor
+except ImportError:
+    HistGradientBoostingRegressor = GradientBoostingRegressor
 from sklearn.linear_model import ElasticNet, Ridge
 from xgboost import XGBRegressor
 
@@ -14,14 +18,22 @@ def get_time_series_models(random_state: int = 42) -> List[Dict[str, Any]]:
     """
     Return candidate models specialized for temporal sequence forecasting.
     """
+    try:
+        gradient_estimator = HistGradientBoostingRegressor(
+            max_iter=150,
+            learning_rate=0.08,
+            random_state=random_state,
+        )
+    except (NameError, TypeError):
+        gradient_estimator = GradientBoostingRegressor(
+            n_estimators=150,
+            learning_rate=0.08,
+            random_state=random_state,
+        )
     return [
         {
             "name": "time_series_gradient_boosting",
-            "estimator": HistGradientBoostingRegressor(
-                max_iter=150,
-                learning_rate=0.08,
-                random_state=random_state,
-            ),
+            "estimator": gradient_estimator,
             "tags": ["time_series", "boosting", "non-linear", "seasonality"],
         },
         {

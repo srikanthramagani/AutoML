@@ -84,7 +84,11 @@ class MultimodalClassifier(BaseEstimator, ClassifierMixin):
         cols = self.numeric_columns + self.categorical_columns
         transformers=[]
         if self.numeric_columns: transformers.append(("num", Pipeline([("impute",SimpleImputer(strategy="median",add_indicator=True)),("scale",StandardScaler())]),self.numeric_columns))
-        if self.categorical_columns: transformers.append(("cat",Pipeline([("impute",SimpleImputer(strategy="most_frequent")),("encode",OneHotEncoder(handle_unknown="ignore", min_frequency=2))]),self.categorical_columns))
+        try:
+            categorical_encoder = OneHotEncoder(handle_unknown="ignore", min_frequency=2)
+        except TypeError:
+            categorical_encoder = OneHotEncoder(handle_unknown="ignore")
+        if self.categorical_columns: transformers.append(("cat",Pipeline([("impute",SimpleImputer(strategy="most_frequent")),("encode",categorical_encoder)]),self.categorical_columns))
         self.tabular_ = ColumnTransformer(transformers, remainder="drop", sparse_threshold=1.0) if transformers else None
         if self.tabular_ is not None: self.tabular_.fit(X,y)
         if self.representation == "tfidf":

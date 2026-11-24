@@ -1,25 +1,27 @@
 """Heuristic, overrideable modality detection for mixed CSV data."""
+from __future__ import annotations
 from dataclasses import asdict, dataclass
 import re
+from typing import List, Optional
 import pandas as pd
 
 
 @dataclass
 class ModalityReport:
-    numerical: list[str]
-    categorical: list[str]
-    boolean: list[str]
-    datetime: list[str]
-    text: list[str]
-    identifiers: list[str]
-    high_cardinality: list[str]
+    numerical: List[str]
+    categorical: List[str]
+    boolean: List[str]
+    datetime: List[str]
+    text: List[str]
+    identifiers: List[str]
+    high_cardinality: List[str]
     rows: int
 
     def to_dict(self):
         return asdict(self)
 
 
-def detect_modalities(frame: pd.DataFrame, target: str | None = None, overrides: dict | None = None) -> ModalityReport:
+def detect_modalities(frame: pd.DataFrame, target: Optional[str] = None, overrides: Optional[dict] = None) -> ModalityReport:
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         raise ValueError("A non-empty dataframe is required.")
     overrides = overrides or {}
