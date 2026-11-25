@@ -4,7 +4,7 @@ from typing import Dict
 
 from fastapi import Depends, FastAPI
 
-from .api import downloads, models, profiling, training, upload, multimodal, forecasting
+from .api import audit, downloads, models, profiling, training, upload, multimodal, forecasting
 from .api.auth import get_owner_id
 
 app = FastAPI(
@@ -21,6 +21,7 @@ app.include_router(models.router, prefix="/api", tags=["models"])
 app.include_router(downloads.router, prefix="/api", tags=["downloads"])
 app.include_router(multimodal.router, prefix="/api", tags=["multimodal"])
 app.include_router(forecasting.router, prefix="/api", tags=["forecasting"])
+app.include_router(audit.router, prefix="/api", tags=["audit"])
 
 
 @app.get("/health")

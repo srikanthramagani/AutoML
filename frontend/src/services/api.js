@@ -29,6 +29,11 @@ export const uploadPredictionCsv = (modelId, file) => {
   return api.post(`/models/${modelId}/predict-upload`, form)
 }
 export const getTrainingStatus = (jobId) => api.get(`/training/${jobId}`)
+export const getEvaluationAudit = (auditId) => api.get(`/audit/${auditId}`)
+export const downloadEvaluationAudit = (auditId, format = 'json') =>
+  api.get(`/audit/${auditId}/report`, { params: { format }, responseType: 'blob' })
+export const runCorrectedEvaluation = (auditId, excludedFeatures = []) =>
+  api.post(`/audit/${auditId}/corrected-evaluation`, { excluded_features: excludedFeatures })
 export const getModelMetadata = (modelId) => api.get(`/models/${modelId}`)
 export const getModelDownloadUrl = (modelId) => `/api/models/${modelId}/download`
 export const getLeaderboardChartUrl = (modelId) => `/api/models/${modelId}/leaderboard-chart`

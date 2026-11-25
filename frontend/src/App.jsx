@@ -13,6 +13,7 @@ import {
   Layers3,
   Play,
   Settings2,
+  ShieldCheck,
   Sparkles,
   UploadCloud,
 } from 'lucide-react'
@@ -21,11 +22,13 @@ import { useAutoML } from './hooks/useAutoML'
 import DatasetProfile from './components/DatasetProfile'
 import AnalysisPage from './pages/AnalysisPage'
 import ExportPage from './pages/ExportPage'
+import EvaluationReliabilityPage from './pages/EvaluationReliabilityPage'
 import ForecastResultPanel from './components/ForecastResultPanel'
 
 const navigation = [
   { id: 'run', label: 'Workspace', icon: Boxes },
   { id: 'analysis', label: 'Analysis', icon: BarChart3, requiresJob: true },
+  { id: 'reliability', label: 'Evaluation Reliability', icon: ShieldCheck, requiresJob: true },
   { id: 'export', label: 'Export', icon: Download, requiresJob: true },
 ]
 
@@ -166,6 +169,9 @@ function App() {
         )}
         {view === 'export' && job?.status === 'complete' && (
           <ExportPage job={job} dataset={dataset} onBack={() => setView('analysis')} />
+        )}
+        {view === 'reliability' && job?.status === 'complete' && (
+          <EvaluationReliabilityPage job={job} onBack={() => setView('analysis')} />
         )}
 
         {view === 'run' && (

@@ -20,6 +20,7 @@ from typing import Optional
 
 from ..automl.engine import AutoMLEngine
 from ..config.settings import Settings, backend_settings
+from ..evaluation.reliability_auditor import EvaluationReliabilityAuditor
 from .state import DATASETS, JOBS, PROJECT_ROOT
 from .state_owner import get_owner_id, set_owner_id
 from .auth import get_owner_id as authenticated_owner_id
@@ -244,6 +245,40 @@ def _run_job(job_id: str, request: TrainingStartRequest, owner_id: str) -> None:
             )
         except Exception as exc:
             chart_error = str(exc)
+        audit_report = None
+        audit_error = None
+        validation_strategy = None
+        try:
+            dataset = DATASETS[request.dataset_id]
+            audit_frame = pd.read_csv(dataset["path"])
+            best_record = next(
+                (record for record in engine.model_records_ if record.get("model_name") == engine.best_model_name_),
+                {},
+            )
+            task_type = engine.task_info_.task_type if engine.task_info_ else request.task
+            validation_strategy = (
+                "stratified holdout + stratified cross-validation"
+                if "classification" in task_type
+                else "random holdout + K-fold cross-validation"
+            )
+            audit_report = EvaluationReliabilityAuditor().audit(
+                dataframe=audit_frame,
+                target_column=engine.profile_.target_column if engine.profile_ else None,
+                task_type=task_type,
+                model_name=engine.best_model_name_ or "unknown",
+                metrics=engine.holdout_metrics_.metrics if engine.holdout_metrics_ else {},
+                train_score=best_record.get("train_score"),
+                validation_score=best_record.get("cv_mean_score"),
+                validation_strategy=validation_strategy,
+                cv_folds=best_record.get("cv_folds"),
+                test_size=settings.test_size,
+                random_seed=settings.random_seed,
+                preprocessing_fold_local=True,
+                dataset_name=dataset.get("filename", "uploaded dataset"),
+                feature_columns=engine.feature_columns_,
+            )
+        except Exception:
+            audit_error = "The evaluation audit could not be completed for this experiment."
         job.update({
             "status": "complete",
             "best_model": engine.best_model_name_,
@@ -262,6 +297,12 @@ def _run_job(job_id: str, request: TrainingStartRequest, owner_id: str) -> None:
             "excluded_identifier_columns": engine.profile_.identifier_columns if engine.profile_ else [],
             "identifier_reasons": engine.profile_.identifier_reasons if engine.profile_ else {},
             "features_used": engine.feature_columns_,
+            "target_column": engine.profile_.target_column if engine.profile_ else request.target_column,
+            "random_seed": settings.random_seed,
+            "validation_strategy": validation_strategy,
+            "dataset_fingerprint": audit_report["dataset"]["fingerprint"] if audit_report else None,
+            "evaluation_audit": audit_report,
+            "audit_error": audit_error,
             "prediction_series": engine.prediction_series_ or [],
             "explainability": engine.explainability_,
             "unsupervised_visualization": engine.unsupervised_visualization_,
